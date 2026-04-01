@@ -32,4 +32,4 @@ def test_vot_measurement_logic():
     # VOT는 복잡한 알고리즘이 필요하므로, 
     # 일단 버스트 지점과 진동 시작 지점을 찾는 내부 함수가 정의되어 있는지 확인
     analyzer = AcousticAnalyzer()
-    assert hasattr(analyzer, "measure_vot")
+    assert hasattr(analyzer, "estimate_plosive_vot")

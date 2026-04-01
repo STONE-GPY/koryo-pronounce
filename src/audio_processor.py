@@ -1,9 +1,10 @@
 import librosa
 import numpy as np
+from src.config import AudioConfig
 
 class AudioProcessor:
     """오디오 로딩, 정규화, VAD(Voice Activity Detection) 수행"""
-    def __init__(self, sample_rate=16000):
+    def __init__(self, sample_rate=AudioConfig.SAMPLE_RATE):
         self.sr = sample_rate
 
     def load_and_normalize(self, file_path: str) -> np.ndarray:

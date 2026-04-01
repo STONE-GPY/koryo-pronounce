@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Koryo Pronounce - 발음 교정</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <header>
+            <h1>Koryo-Pronounce</h1>
+            <p>고려인 맞춤형 한국어 발음 교정</p>
+        </header>
+
+        <main>
+            <div class="card sentence-card">
+                <h3>따라 읽어보세요</h3>
+                <h2 id="target-sentence">학교</h2>
+                <div class="sentence-controls">
+                    <button class="btn-icon" onclick="changeSentence()"><i class="fas fa-random"></i> 다른 문장</button>
+                </div>
+            </div>
+
+            <div class="record-container">
+                <button id="record-btn" class="record-btn">
+                    <i class="fas fa-microphone"></i>
+                </button>
+                <p id="record-status">버튼을 눌러 녹음 시작</p>
+            </div>
+
+            <div id="loading" class="hidden">
+                <div class="spinner"></div>
+                <p>발음을 정밀 분석하고 있습니다...</p>
+            </div>
+
+            <div id="result-container" class="card result-card hidden">
+                <h3>분석 종합 점수</h3>
+                <div class="score-circle">
+                    <span id="total-score">0</span>
+                    <small>점</small>
+                </div>
+                
+                <div class="feedback-section">
+                    <h4>전문가 피드백 상세</h4>
+                    <ul id="feedback-list"></ul>
+                </div>
+            </div>
+        </main>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>

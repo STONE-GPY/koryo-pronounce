@@ -1,3 +1,5 @@
+from src.config import PitchConfig, ScoringConfig
+
 class PronunciationScorer:
     """음성학적 수치를 기반으로 발음 점수 및 피드백 산출"""
     def __init__(self):
@@ -7,8 +9,8 @@ class PronunciationScorer:
             "ㄱ": (35, 55, "평음"), # 중간
             "ㅋ": (80, 120, "격음") # 매우 김
         }
-        # 모음 표준 포먼트 (남성) - 개인화 스케일링의 기준점이 됨
-        self.vowel_standards_male = {
+        # 모음 표준 포먼트 (기본값) - 개인화 스케일링의 기준점이 됨
+        self.base_vowel_standards = {
             "ㅏ": (750, 1250),
             "ㅓ": (600, 1000),
             "ㅗ": (400, 850),
@@ -19,7 +21,7 @@ class PronunciationScorer:
             "ㅐ": (600, 1600)
         }
         # 이중모음 (시작점(F1, F2), 종료점(F1, F2))
-        self.diphthong_standards_male = {
+        self.base_diphthong_standards = {
             "ㅑ": ((300, 2200), (750, 1250)),
             "ㅕ": ((300, 2200), (600, 1000)),
             "ㅛ": ((300, 2200), (400, 850)),
@@ -38,11 +40,11 @@ class PronunciationScorer:
     @property
     def vowel_standards(self):
         """음소 존재 여부 검사를 위한 기본 키 집합 반환"""
-        return list(self.vowel_standards_male.keys())
+        return list(self.base_vowel_standards.keys())
         
     @property
     def diphthong_standards(self):
-        return list(self.diphthong_standards_male.keys())
+        return list(self.base_diphthong_standards.keys())
 
     def score_plosive(self, target_phoneme: str, user_vot: float) -> dict:
         """파열음(ㄱ, ㄲ, ㅋ 등)의 VOT 점수화"""
@@ -70,27 +72,24 @@ class PronunciationScorer:
 
     def score_vowel(self, target_phoneme: str, user_f1: float, user_f2: float, user_pitch: float = 0.0) -> dict:
         """Pitch(F0) 기반 동적 포먼트 스케일링 적용 (개인 맞춤형 모음 점수화)"""
-        if target_phoneme not in self.vowel_standards_male:
+        if target_phoneme not in self.base_vowel_standards:
             return {"score": 100, "feedback": "준비되지 않은 음소입니다."}
             
-        base_f1, base_f2 = self.vowel_standards_male[target_phoneme]
+        base_f1, base_f2 = self.base_vowel_standards[target_phoneme]
         
         # 개인화 스케일링 (Vocal Tract Length Normalization Approximation)
-        # 표준 남성(120Hz) 기준, Pitch가 100Hz 증가할 때 포먼트는 약 20% 상승한다고 가정
-        if user_pitch > 50.0:  # 유효한 Pitch가 측정된 경우
-            scale_factor = 1.0 + ((user_pitch - 120.0) * 0.002)
-            # 극단적인 값이 나오지 않도록 스케일 팩터 제한 (0.8 ~ 1.4)
-            scale_factor = max(0.8, min(1.4, scale_factor))
+        if user_pitch > PitchConfig.MIN_VALID_PITCH:
+            scale_factor = 1.0 + ((user_pitch - PitchConfig.MALE_BASE_PITCH) * ScoringConfig.SCALE_FACTOR_SLOPE)
+            scale_factor = max(ScoringConfig.MIN_SCALE_FACTOR, min(ScoringConfig.MAX_SCALE_FACTOR, scale_factor))
         else:
-            scale_factor = 1.0 # 측정 불가 시 남성 기본값 사용
+            scale_factor = 1.0
             
         target_f1 = base_f1 * scale_factor
         target_f2 = base_f2 * scale_factor
         
         # 유클리드 거리 기반 점수 산출
         dist = ((user_f1 - target_f1)**2 + (user_f2 - target_f2)**2)**0.5
-        # 감점 로직 완화 (거리 10당 1점 감점에서 15당 1점 감점으로 조정)
-        score = max(0, 100 - (dist / 15)) 
+        score = max(0, 100 - (dist / ScoringConfig.VOWEL_PENALTY_DIVISOR)) 
         
         feedback = (f"[개인화 타겟 F1:{target_f1:.0f} F2:{target_f2:.0f} (Pitch:{user_pitch:.0f}Hz)] "
                     f"'{target_phoneme}' 모음의 기준 대비 오차 거리는 {dist:.1f}입니다.")
@@ -99,14 +98,14 @@ class PronunciationScorer:
 
     def score_diphthong(self, target_phoneme: str, user_start_f1: float, user_start_f2: float, user_end_f1: float, user_end_f2: float, user_pitch: float = 0.0) -> dict:
         """이중모음의 시작점과 종료점 포먼트를 기반으로 점수 산출"""
-        if target_phoneme not in self.diphthong_standards_male:
+        if target_phoneme not in self.base_diphthong_standards:
             return {"score": 100, "feedback": "준비되지 않은 음소입니다."}
             
-        base_start, base_end = self.diphthong_standards_male[target_phoneme]
+        base_start, base_end = self.base_diphthong_standards[target_phoneme]
         
-        if user_pitch > 50.0:
-            scale_factor = 1.0 + ((user_pitch - 120.0) * 0.002)
-            scale_factor = max(0.8, min(1.4, scale_factor))
+        if user_pitch > PitchConfig.MIN_VALID_PITCH:
+            scale_factor = 1.0 + ((user_pitch - PitchConfig.MALE_BASE_PITCH) * ScoringConfig.SCALE_FACTOR_SLOPE)
+            scale_factor = max(ScoringConfig.MIN_SCALE_FACTOR, min(ScoringConfig.MAX_SCALE_FACTOR, scale_factor))
         else:
             scale_factor = 1.0
             
@@ -117,7 +116,7 @@ class PronunciationScorer:
         dist_end = ((user_end_f1 - target_end[0])**2 + (user_end_f2 - target_end[1])**2)**0.5
         avg_dist = (dist_start + dist_end) / 2
         
-        score = max(0, 100 - (avg_dist / 15))
+        score = max(0, 100 - (avg_dist / ScoringConfig.VOWEL_PENALTY_DIVISOR))
         
         feedback = (f"[개인화 이중모음 타겟 (Pitch:{user_pitch:.0f}Hz)] "
                     f"'{target_phoneme}'의 시작점 오차: {dist_start:.1f}, 종료점 오차: {dist_end:.1f} (평균 오차: {avg_dist:.1f})")

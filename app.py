@@ -14,15 +14,18 @@ class PronunciationApp:
 
     def analyze_pronunciation(self, audio_path: str, target_text: str) -> dict:
         """오디오와 제시된 문장을 비교하여 발음 분석 리포트 생성"""
+        import uuid
         # 1. G2P 변환
         phonemes = self.g2p.convert(target_text)
+        phonemes_no_space = phonemes.replace(" ", "")
         
         # 2. 오디오 전처리
         normalized_audio = self.audio_proc.load_and_normalize(audio_path)
-        # 임시로 전처리된 오디오 저장 (분석용)
-        temp_path = "data/temp_processed.wav"
+        # 임시로 전처리된 오디오 저장 (분석용) - 동시성 에러(Race Condition) 방지
+        temp_path = f"data/temp_processed_{uuid.uuid4().hex}.wav"
         import soundfile as sf
-        sf.write(temp_path, normalized_audio, 16000)
+        from src.config import AudioConfig
+        sf.write(temp_path, normalized_audio, AudioConfig.SAMPLE_RATE)
         
         # 3. 음향 분석 및 스코어링 (음절 동기화 및 이중모음 지원)
         # 화자 Pitch(F0) 측정 (개인화 스케일링용)
@@ -31,8 +34,8 @@ class PronunciationApp:
         import jamo
         import librosa
         
-        duration = librosa.get_duration(filename=temp_path)
-        num_syllables = len(phonemes)
+        duration = librosa.get_duration(path=temp_path) # filename -> path (DeprecationWarning 해결)
+        num_syllables = len(phonemes_no_space) # 공백 제외 순수 발음 음절 수
         segment_duration = duration / num_syllables if num_syllables > 0 else duration
         
         scores = []
@@ -43,7 +46,7 @@ class PronunciationApp:
         syllable_vowels = []
         syllable_plosives = []
         
-        for char in phonemes:
+        for char in phonemes_no_space:
             decomposed = jamo.j2hcj(jamo.h2j(char))
             
             # 모음 탐색 (이중모음 우선)
