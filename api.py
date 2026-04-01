@@ -1,13 +1,21 @@
 import os
 import shutil
 import uuid
-from fastapi import FastAPI, File, UploadFile, Form
+import logging
+from typing import Any, Dict
+
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
+
 from app import PronunciationApp
 
-app = FastAPI()
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+app = FastAPI(title="Koryo-saram Pronunciation API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,27 +28,33 @@ app.add_middleware(
 pronunciation_app = PronunciationApp()
 os.makedirs("data/uploads", exist_ok=True)
 
-@app.post("/api/analyze")
-async def analyze(audio: UploadFile = File(...), target_text: str = Form(...)):
+@app.post("/api/analyze", response_model=Dict[str, Any])
+async def analyze(audio: UploadFile = File(...), target_text: str = Form(...)) -> Dict[str, Any]:
+    """Analyzes the pronunciation of the uploaded audio against the target text."""
+    if not audio.filename:
+        raise HTTPException(status_code=400, detail="No audio file provided.")
+        
     file_id = str(uuid.uuid4())
     ext = audio.filename.split(".")[-1] if "." in audio.filename else "webm"
     file_path = f"data/uploads/{file_id}.{ext}"
     
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(audio.file, buffer)
-    
     try:
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(audio.file, buffer)
+            
         # Run analysis pipeline
         result = pronunciation_app.analyze_pronunciation(file_path, target_text)
         return result
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.error(f"Error during analysis: {str(e)}", exc_info=True)
+        return JSONResponse(status_code=500, content={"error": "Internal server error during analysis."})
     finally:
-        # Clean up
+        # Clean up the uploaded file
         if os.path.exists(file_path):
-            os.remove(file_path)
+            try:
+                os.remove(file_path)
+            except Exception as e:
+                logger.warning(f"Failed to remove temporary file {file_path}: {e}")
 
 # Serve the static UI files
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
