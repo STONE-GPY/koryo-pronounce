@@ -7,12 +7,23 @@ class PronunciationScorer:
             "ㄱ": (35, 55, "평음"), # 중간
             "ㅋ": (80, 120, "격음") # 매우 김
         }
-        # 모음 표준 포먼트 (F1, F2 - 성인 남성 평균 예시)
-        self.vowel_standards = {
+        # 모음 표준 포먼트 (남성)
+        self.vowel_standards_male = {
             "ㅏ": (750, 1250),
             "ㅣ": (300, 2200),
             "ㅜ": (350, 800)
         }
+        # 모음 표준 포먼트 (여성 - 남성에 비해 F1/F2가 약 15~20% 더 높음)
+        self.vowel_standards_female = {
+            "ㅏ": (850, 1400),
+            "ㅣ": (350, 2600),
+            "ㅜ": (400, 950)
+        }
+
+    @property
+    def vowel_standards(self):
+        """음소 존재 여부 검사를 위한 기본 키 집합 반환"""
+        return list(self.vowel_standards_male.keys())
 
     def score_plosive(self, target_phoneme: str, user_vot: float) -> dict:
         """파열음(ㄱ, ㄲ, ㅋ 등)의 VOT 점수화"""
@@ -38,18 +49,31 @@ class PronunciationScorer:
             
         return {"score": score, "feedback": feedback}
 
-    def score_vowel(self, target_phoneme: str, user_f1: float, user_f2: float) -> dict:
-        """모음의 포먼트(F1, F2) 위치 점수화"""
-        if target_phoneme not in self.vowel_standards:
+    def score_vowel(self, target_phoneme: str, user_f1: float, user_f2: float, user_pitch: float = 0.0) -> dict:
+        """Pitch(F0) 기반 동적 포먼트 스케일링 적용 (개인 맞춤형 모음 점수화)"""
+        if target_phoneme not in self.vowel_standards_male:
             return {"score": 100, "feedback": "준비되지 않은 음소입니다."}
             
-        std_f1, std_f2 = self.vowel_standards[target_phoneme]
+        base_f1, base_f2 = self.vowel_standards_male[target_phoneme]
+        
+        # 개인화 스케일링 (Vocal Tract Length Normalization Approximation)
+        # 표준 남성(120Hz) 기준, Pitch가 100Hz 증가할 때 포먼트는 약 20% 상승한다고 가정
+        if user_pitch > 50.0:  # 유효한 Pitch가 측정된 경우
+            scale_factor = 1.0 + ((user_pitch - 120.0) * 0.002)
+            # 극단적인 값이 나오지 않도록 스케일 팩터 제한 (0.8 ~ 1.4)
+            scale_factor = max(0.8, min(1.4, scale_factor))
+        else:
+            scale_factor = 1.0 # 측정 불가 시 남성 기본값 사용
+            
+        target_f1 = base_f1 * scale_factor
+        target_f2 = base_f2 * scale_factor
         
         # 유클리드 거리 기반 점수 산출
-        dist = ((user_f1 - std_f1)**2 + (user_f2 - std_f2)**2)**0.5
-        score = max(0, 100 - (dist / 10)) # 거리 1000이면 0점
+        dist = ((user_f1 - target_f1)**2 + (user_f2 - target_f2)**2)**0.5
+        # 감점 로직 완화 (거리 10당 1점 감점에서 15당 1점 감점으로 조정)
+        score = max(0, 100 - (dist / 15)) 
         
-        return {
-            "score": score, 
-            "feedback": f"'{target_phoneme}' 모음의 표준 포먼트 대비 거리는 {dist:.1f}입니다."
-        }
+        feedback = (f"[개인화 타겟 F1:{target_f1:.0f} F2:{target_f2:.0f} (Pitch:{user_pitch:.0f}Hz)] "
+                    f"'{target_phoneme}' 모음의 기준 대비 오차 거리는 {dist:.1f}입니다.")
+        
+        return {"score": score, "feedback": feedback}

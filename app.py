@@ -24,13 +24,21 @@ class PronunciationApp:
         import soundfile as sf
         sf.write(temp_path, normalized_audio, 16000)
         
-        # 3. 음향 분석 (예: 첫 번째 음절의 포먼트 및 기본 VOT 분석)
-        # 실제 구현에서는 음절 분할이 선행되어야 함
+        # 3. 음향 분석
+        # 화자 Pitch(F0) 측정 (개인화 스케일링용)
+        user_pitch = self.analyzer.get_pitch(temp_path)
+        # 포먼트 추출
         formants = self.analyzer.get_formants(temp_path)
         
-        # 4. 스코어링 (예시로 첫 번째 모음 'ㅏ'가 포함된 경우 테스트)
-        # 여기서는 구조적 시뮬레이션을 위해 고정된 타겟 음소 분석 수행
-        vowel_score = self.scorer.score_vowel("ㅏ", formants["f1"], formants["f2"])
+        # 4. 스코어링
+        # 타겟 문장의 음소 중 스코어러에 정의된 모음을 찾아 점수화
+        import jamo
+        decomposed = jamo.j2hcj(jamo.h2j(phonemes))
+        vowel_score = {"score": 100, "feedback": "분석할 수 있는 모음이 없습니다."}
+        for p in decomposed:
+            if p in self.scorer.vowel_standards:
+                vowel_score = self.scorer.score_vowel(p, formants["f1"], formants["f2"], user_pitch=user_pitch)
+                break
         
         # 5. 최종 리포트 구성
         report = {

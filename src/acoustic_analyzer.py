@@ -29,6 +29,23 @@ class AcousticAnalyzer:
         vot_ms = (voicing_onset - burst_time) * 1000
         return vot_ms
 
+    def get_pitch(self, audio_file: str) -> float:
+        """Parselmouth를 사용하여 평균 Pitch(F0) 추출"""
+        sound = parselmouth.Sound(audio_file)
+        pitch = sound.to_pitch()
+        pitch_values = pitch.selected_array['frequency']
+        pitch_values = pitch_values[pitch_values > 0] # 무음/unvoiced 구간 제외
+        if len(pitch_values) > 0:
+            return float(np.mean(pitch_values))
+        return 0.0
+
+    def estimate_gender(self, audio_file: str) -> str:
+        """Pitch를 기반으로 성별 추정 (165Hz를 임계값으로 사용)"""
+        mean_pitch = self.get_pitch(audio_file)
+        if mean_pitch == 0.0:
+            return "unknown"
+        return "female" if mean_pitch > 165 else "male"
+
     def analyze_vowel_space(self, f1: float, f2: float) -> str:
         """포먼트 기반 모음 위치 판별 (간단한 로직)"""
         # 'ㅏ', 'ㅓ', 'ㅗ', 'ㅜ', 'ㅡ', 'ㅣ'의 대략적인 F1/F2 범위 비교
