@@ -59,15 +59,19 @@ class PronunciationScorer:
         # 차이가 40ms 이상이면 0점 근처
         score = max(0, 100 - (diff * 2))
         
-        feedback = f"{p_type} 발음의 VOT는 표준 {std_min}~{std_max}ms이나, 사용자는 {user_vot:.1f}ms입니다."
+        feedback = f"[{target_phoneme} 발음] "
         
         if user_vot < std_min:
-            feedback += " 공기가 터지는 시간이 너무 빠릅니다."
+            feedback += "공기를 터뜨리는 힘이 약합니다. 입술이나 혀에 힘을 주고 공기를 더 모았다가 터뜨려주세요."
         elif user_vot > std_max:
-            feedback += " 공기가 터지는 시간이 너무 늦습니다."
+            if p_type == "경음":
+                feedback += "공기가 너무 많이 샙니다. 목에 힘을 단단히 주고 소리를 짧게 끊어 내뱉으세요."
+            else:
+                feedback += "공기가 너무 길게 나옵니다. 터지는 소리를 조금 더 짧게 끊어주세요."
         else:
-            feedback += " 아주 정확한 타이밍입니다!"
+            feedback += "아주 정확한 타이밍입니다!"
             
+        feedback += f" (정확도: {score:.1f}점)"
         return {"score": score, "feedback": feedback}
 
     def score_vowel(self, target_phoneme: str, user_f1: float, user_f2: float, user_pitch: float = 0.0) -> dict:
@@ -91,8 +95,25 @@ class PronunciationScorer:
         dist = ((user_f1 - target_f1)**2 + (user_f2 - target_f2)**2)**0.5
         score = max(0, 100 - (dist / ScoringConfig.VOWEL_PENALTY_DIVISOR)) 
         
-        feedback = (f"[개인화 타겟 F1:{target_f1:.0f} F2:{target_f2:.0f} (Pitch:{user_pitch:.0f}Hz)] "
-                    f"'{target_phoneme}' 모음의 기준 대비 오차 거리는 {dist:.1f}입니다.")
+        f1_diff = target_f1 - user_f1
+        f2_diff = target_f2 - user_f2
+        
+        anatomical_feedback = ""
+        if score < 90:
+            if f1_diff > 50:
+                anatomical_feedback += "입을 더 크게 벌려주세요. "
+            elif f1_diff < -50:
+                anatomical_feedback += "입을 조금 덜 벌려주세요. "
+                
+            if f2_diff > 100:
+                anatomical_feedback += "혀를 입 앞쪽으로 더 밀어주세요. "
+            elif f2_diff < -100:
+                anatomical_feedback += "혀를 입 안쪽으로 살짝 당겨주세요. "
+                
+        if anatomical_feedback:
+            feedback = f"[{target_phoneme} 발음 교정] {anatomical_feedback.strip()} (정확도: {score:.1f}점)"
+        else:
+            feedback = f"[{target_phoneme} 발음] 훌륭한 모음 발음입니다! (정확도: {score:.1f}점)"
         
         return {"score": score, "feedback": feedback}
 
@@ -118,6 +139,16 @@ class PronunciationScorer:
         
         score = max(0, 100 - (avg_dist / ScoringConfig.VOWEL_PENALTY_DIVISOR))
         
-        feedback = (f"[개인화 이중모음 타겟 (Pitch:{user_pitch:.0f}Hz)] "
-                    f"'{target_phoneme}'의 시작점 오차: {dist_start:.1f}, 종료점 오차: {dist_end:.1f} (평균 오차: {avg_dist:.1f})")
+        anatomical_feedback = ""
+        if score < 90:
+            if dist_start > dist_end:
+                anatomical_feedback = "시작하는 소리의 입 모양이 부정확합니다. 첫 소리를 더 분명하게 내주세요."
+            else:
+                anatomical_feedback = "끝나는 소리의 입 모양이 부정확합니다. 혀와 입술을 끝까지 부드럽게 움직여주세요."
+        
+        if anatomical_feedback:
+            feedback = f"[{target_phoneme} 발음 교정] {anatomical_feedback} (정확도: {score:.1f}점)"
+        else:
+            feedback = f"[{target_phoneme} 발음] 아주 자연스러운 이중모음입니다! (정확도: {score:.1f}점)"
+            
         return {"score": score, "feedback": feedback}

@@ -8,7 +8,7 @@ def test_calculate_score_for_plosives():
     # 10ms (러시아어식 발음)이면 낮은 점수가 나와야 함
     score_info = scorer.score_plosive(target_phoneme="ㄱ", user_vot=10)
     assert score_info["score"] < 70
-    assert "평음" in score_info["feedback"]
+    assert "공기를 터뜨리는 힘이 약합니다" in score_info["feedback"]
     
     # 정상 범위 점수
     score_info_normal = scorer.score_plosive(target_phoneme="ㄱ", user_vot=40)
