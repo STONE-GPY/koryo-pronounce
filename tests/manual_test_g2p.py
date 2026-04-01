@@ -1,9 +1,9 @@
 import sys
-from src.g2p_engine import KoryoG2P
+from src.g2p_engine import KoryoG2PEngine
 
 def test_convert_sentence_to_phonemes():
     try:
-        g2p = KoryoG2P()
+        g2p = KoryoG2PEngine()
         sentence = "국물 같이 먹자"
         result = g2p.convert(sentence)
         print(f"Input: {sentence}, Output: {result}")

@@ -1,4 +1,4 @@
-from src.g2p_engine import KoryoG2P
+from src.g2p_engine import KoryoG2PEngine
 from src.audio_processor import AudioProcessor
 from src.acoustic_analyzer import AcousticAnalyzer
 from src.scorer import PronunciationScorer
@@ -7,7 +7,7 @@ import os
 class PronunciationApp:
     """고려인 대상 발음 교정 시스템 통합 애플리케이션"""
     def __init__(self):
-        self.g2p = KoryoG2P()
+        self.g2p = KoryoG2PEngine()
         self.audio_proc = AudioProcessor()
         self.analyzer = AcousticAnalyzer()
         self.scorer = PronunciationScorer()
