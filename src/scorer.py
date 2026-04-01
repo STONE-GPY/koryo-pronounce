@@ -1,99 +1,105 @@
+from typing import Dict, List, Tuple, Union, Optional
 from src.config import PitchConfig, ScoringConfig
 
 class PronunciationScorer:
-    """음성학적 수치를 기반으로 발음 점수 및 피드백 산출"""
-    def __init__(self):
-        # 파열음 표준 VOT (ms 단위)
-        self.vot_standards = {
-            "ㄲ": (0, 15, "경음"), # 매우 짧음
-            "ㄱ": (35, 55, "평음"), # 중간
-            "ㅋ": (80, 120, "격음") # 매우 김
+    """Calculates pronunciation scores and provides feedback based on acoustic features."""
+    
+    def __init__(self) -> None:
+        """Initialize the scorer with standard phonetic values."""
+        # Plosive standard VOT (in ms)
+        self.vot_standards: Dict[str, Tuple[float, float, str]] = {
+            "ㄲ": (0.0, 15.0, "경음"),  # Tense (very short)
+            "ㄱ": (35.0, 55.0, "평음"),  # Lax (medium)
+            "ㅋ": (80.0, 120.0, "격음")  # Aspirated (very long)
         }
-        # 모음 표준 포먼트 (기본값) - 개인화 스케일링의 기준점이 됨
-        self.base_vowel_standards = {
-            "ㅏ": (750, 1250),
-            "ㅓ": (600, 1000),
-            "ㅗ": (400, 850),
-            "ㅜ": (350, 800),
-            "ㅡ": (350, 1300),
-            "ㅣ": (300, 2200),
-            "ㅔ": (550, 1700),
-            "ㅐ": (600, 1600)
+        
+        # Base vowel standards (F1, F2) - used as baseline for personalized scaling
+        self.base_vowel_standards: Dict[str, Tuple[float, float]] = {
+            "ㅏ": (750.0, 1250.0),
+            "ㅓ": (600.0, 1000.0),
+            "ㅗ": (400.0, 850.0),
+            "ㅜ": (350.0, 800.0),
+            "ㅡ": (350.0, 1300.0),
+            "ㅣ": (300.0, 2200.0),
+            "ㅔ": (550.0, 1700.0),
+            "ㅐ": (600.0, 1600.0)
         }
-        # 이중모음 (시작점(F1, F2), 종료점(F1, F2))
-        self.base_diphthong_standards = {
-            "ㅑ": ((300, 2200), (750, 1250)),
-            "ㅕ": ((300, 2200), (600, 1000)),
-            "ㅛ": ((300, 2200), (400, 850)),
-            "ㅠ": ((300, 2200), (350, 800)),
-            "ㅘ": ((400, 850), (750, 1250)),
-            "ㅝ": ((350, 800), (600, 1000)),
-            "ㅙ": ((400, 850), (600, 1600)),
-            "ㅞ": ((350, 800), (550, 1700)),
-            "ㅚ": ((400, 850), (550, 1700)),
-            "ㅟ": ((350, 800), (300, 2200)),
-            "ㅢ": ((350, 1300), (300, 2200)),
-            "ㅒ": ((300, 2200), (600, 1600)),
-            "ㅖ": ((300, 2200), (550, 1700))
+        
+        # Diphthong standards ((start_F1, start_F2), (end_F1, end_F2))
+        self.base_diphthong_standards: Dict[str, Tuple[Tuple[float, float], Tuple[float, float]]] = {
+            "ㅑ": ((300.0, 2200.0), (750.0, 1250.0)),
+            "ㅕ": ((300.0, 2200.0), (600.0, 1000.0)),
+            "ㅛ": ((300.0, 2200.0), (400.0, 850.0)),
+            "ㅠ": ((300.0, 2200.0), (350.0, 800.0)),
+            "ㅘ": ((400.0, 850.0), (750.0, 1250.0)),
+            "ㅝ": ((350.0, 800.0), (600.0, 1000.0)),
+            "ㅙ": ((400.0, 850.0), (600.0, 1600.0)),
+            "ㅞ": ((350.0, 800.0), (550.0, 1700.0)),
+            "ㅚ": ((400.0, 850.0), (550.0, 1700.0)),
+            "ㅟ": ((350.0, 800.0), (300.0, 2200.0)),
+            "ㅢ": ((350.0, 1300.0), (300.0, 2200.0)),
+            "ㅒ": ((300.0, 2200.0), (600.0, 1600.0)),
+            "ㅖ": ((300.0, 2200.0), (550.0, 1700.0))
         }
 
     @property
-    def vowel_standards(self):
-        """음소 존재 여부 검사를 위한 기본 키 집합 반환"""
+    def vowel_standards(self) -> List[str]:
+        """Returns the list of supported monophthongs."""
         return list(self.base_vowel_standards.keys())
         
     @property
-    def diphthong_standards(self):
+    def diphthong_standards(self) -> List[str]:
+        """Returns the list of supported diphthongs."""
         return list(self.base_diphthong_standards.keys())
 
-    def score_plosive(self, target_phoneme: str, user_vot: float) -> dict:
-        """파열음(ㄱ, ㄲ, ㅋ 등)의 VOT 점수화"""
+    def _get_scale_factor(self, user_pitch: float) -> float:
+        """Calculates scaling factor for personalization based on user pitch."""
+        if user_pitch > PitchConfig.MIN_VALID_PITCH:
+            scale_factor = 1.0 + ((user_pitch - PitchConfig.MALE_BASE_PITCH) * ScoringConfig.SCALE_FACTOR_SLOPE)
+            return max(ScoringConfig.MIN_SCALE_FACTOR, min(ScoringConfig.MAX_SCALE_FACTOR, scale_factor))
+        return 1.0
+
+    def score_plosive(self, target_phoneme: str, user_vot: float) -> Dict[str, Union[float, str]]:
+        """Scores Voice Onset Time (VOT) for plosives (e.g., ㄱ, ㄲ, ㅋ)."""
         if target_phoneme not in self.vot_standards:
-            return {"score": 100, "feedback": "준비되지 않은 음소입니다."}
+            return {"score": 0.0, "feedback": f"Unsupported phoneme: {target_phoneme}"}
             
         std_min, std_max, p_type = self.vot_standards[target_phoneme]
         mid = (std_min + std_max) / 2
         diff = abs(user_vot - mid)
         
-        # 0 ~ 100 점수 산출 (가우시안 혹은 선형 감점)
-        # 차이가 40ms 이상이면 0점 근처
-        score = max(0, 100 - (diff * 2))
+        # 0 ~ 100 score calculation (linear penalty)
+        score = max(0.0, 100.0 - (diff * 2.0))
         
-        feedback = f"[{target_phoneme} 발음] "
+        feedback = f"[{target_phoneme} pronunciation] "
         
         if user_vot < std_min:
-            feedback += "공기를 터뜨리는 힘이 약합니다. 입술이나 혀에 힘을 주고 공기를 더 모았다가 터뜨려주세요."
+            feedback += "Release force is weak. Apply more pressure to the articulators and release with more air."
         elif user_vot > std_max:
             if p_type == "경음":
-                feedback += "공기가 너무 많이 샙니다. 목에 힘을 단단히 주고 소리를 짧게 끊어 내뱉으세요."
+                feedback += "Too much air leakage. Tense the throat and release the sound more abruptly."
             else:
-                feedback += "공기가 너무 길게 나옵니다. 터지는 소리를 조금 더 짧게 끊어주세요."
+                feedback += "Aspiration is too long. Try to make the burst shorter."
         else:
-            feedback += "아주 정확한 타이밍입니다!"
+            feedback += "Excellent timing!"
             
-        feedback += f" (정확도: {score:.1f}점)"
-        return {"score": score, "feedback": feedback}
+        feedback += f" (Accuracy: {score:.1f}%)"
+        return {"score": float(score), "feedback": feedback}
 
-    def score_vowel(self, target_phoneme: str, user_f1: float, user_f2: float, user_pitch: float = 0.0) -> dict:
-        """Pitch(F0) 기반 동적 포먼트 스케일링 적용 (개인 맞춤형 모음 점수화)"""
+    def score_vowel(self, target_phoneme: str, user_f1: float, user_f2: float, user_pitch: float = 0.0) -> Dict[str, Union[float, str]]:
+        """Scores monophthongs using F1/F2 formants with dynamic scaling."""
         if target_phoneme not in self.base_vowel_standards:
-            return {"score": 100, "feedback": "준비되지 않은 음소입니다."}
+            return {"score": 0.0, "feedback": f"Unsupported vowel: {target_phoneme}"}
             
         base_f1, base_f2 = self.base_vowel_standards[target_phoneme]
-        
-        # 개인화 스케일링 (Vocal Tract Length Normalization Approximation)
-        if user_pitch > PitchConfig.MIN_VALID_PITCH:
-            scale_factor = 1.0 + ((user_pitch - PitchConfig.MALE_BASE_PITCH) * ScoringConfig.SCALE_FACTOR_SLOPE)
-            scale_factor = max(ScoringConfig.MIN_SCALE_FACTOR, min(ScoringConfig.MAX_SCALE_FACTOR, scale_factor))
-        else:
-            scale_factor = 1.0
+        scale_factor = self._get_scale_factor(user_pitch)
             
         target_f1 = base_f1 * scale_factor
         target_f2 = base_f2 * scale_factor
         
-        # 유클리드 거리 기반 점수 산출
+        # Euclidean distance based scoring
         dist = ((user_f1 - target_f1)**2 + (user_f2 - target_f2)**2)**0.5
-        score = max(0, 100 - (dist / ScoringConfig.VOWEL_PENALTY_DIVISOR)) 
+        score = max(0.0, 100.0 - (dist / ScoringConfig.VOWEL_PENALTY_DIVISOR)) 
         
         f1_diff = target_f1 - user_f1
         f2_diff = target_f2 - user_f2
@@ -101,34 +107,30 @@ class PronunciationScorer:
         anatomical_feedback = ""
         if score < 90:
             if f1_diff > 50:
-                anatomical_feedback += "입을 더 크게 벌려주세요. "
+                anatomical_feedback += "Open your mouth wider. "
             elif f1_diff < -50:
-                anatomical_feedback += "입을 조금 덜 벌려주세요. "
+                anatomical_feedback += "Close your mouth a bit more. "
                 
             if f2_diff > 100:
-                anatomical_feedback += "혀를 입 앞쪽으로 더 밀어주세요. "
+                anatomical_feedback += "Move your tongue forward. "
             elif f2_diff < -100:
-                anatomical_feedback += "혀를 입 안쪽으로 살짝 당겨주세요. "
+                anatomical_feedback += "Move your tongue back. "
                 
         if anatomical_feedback:
-            feedback = f"[{target_phoneme} 발음 교정] {anatomical_feedback.strip()} (정확도: {score:.1f}점)"
+            feedback = f"[{target_phoneme} correction] {anatomical_feedback.strip()} (Accuracy: {score:.1f}%)"
         else:
-            feedback = f"[{target_phoneme} 발음] 훌륭한 모음 발음입니다! (정확도: {score:.1f}점)"
+            feedback = f"[{target_phoneme} pronunciation] Great vowel pronunciation! (Accuracy: {score:.1f}%)"
         
-        return {"score": score, "feedback": feedback}
+        return {"score": float(score), "feedback": feedback}
 
-    def score_diphthong(self, target_phoneme: str, user_start_f1: float, user_start_f2: float, user_end_f1: float, user_end_f2: float, user_pitch: float = 0.0) -> dict:
-        """이중모음의 시작점과 종료점 포먼트를 기반으로 점수 산출"""
+    def score_diphthong(self, target_phoneme: str, user_start_f1: float, user_start_f2: float, 
+                        user_end_f1: float, user_end_f2: float, user_pitch: float = 0.0) -> Dict[str, Union[float, str]]:
+        """Scores diphthongs based on start and end formant transitions."""
         if target_phoneme not in self.base_diphthong_standards:
-            return {"score": 100, "feedback": "준비되지 않은 음소입니다."}
+            return {"score": 0.0, "feedback": f"Unsupported diphthong: {target_phoneme}"}
             
         base_start, base_end = self.base_diphthong_standards[target_phoneme]
-        
-        if user_pitch > PitchConfig.MIN_VALID_PITCH:
-            scale_factor = 1.0 + ((user_pitch - PitchConfig.MALE_BASE_PITCH) * ScoringConfig.SCALE_FACTOR_SLOPE)
-            scale_factor = max(ScoringConfig.MIN_SCALE_FACTOR, min(ScoringConfig.MAX_SCALE_FACTOR, scale_factor))
-        else:
-            scale_factor = 1.0
+        scale_factor = self._get_scale_factor(user_pitch)
             
         target_start = (base_start[0] * scale_factor, base_start[1] * scale_factor)
         target_end = (base_end[0] * scale_factor, base_end[1] * scale_factor)
@@ -137,18 +139,18 @@ class PronunciationScorer:
         dist_end = ((user_end_f1 - target_end[0])**2 + (user_end_f2 - target_end[1])**2)**0.5
         avg_dist = (dist_start + dist_end) / 2
         
-        score = max(0, 100 - (avg_dist / ScoringConfig.VOWEL_PENALTY_DIVISOR))
+        score = max(0.0, 100.0 - (avg_dist / ScoringConfig.VOWEL_PENALTY_DIVISOR))
         
         anatomical_feedback = ""
         if score < 90:
             if dist_start > dist_end:
-                anatomical_feedback = "시작하는 소리의 입 모양이 부정확합니다. 첫 소리를 더 분명하게 내주세요."
+                anatomical_feedback = "The starting position of the sound is inaccurate. Try to make the initial sound clearer."
             else:
-                anatomical_feedback = "끝나는 소리의 입 모양이 부정확합니다. 혀와 입술을 끝까지 부드럽게 움직여주세요."
+                anatomical_feedback = "The ending position of the sound is inaccurate. Ensure smooth movement of tongue and lips until the end."
         
         if anatomical_feedback:
-            feedback = f"[{target_phoneme} 발음 교정] {anatomical_feedback} (정확도: {score:.1f}점)"
+            feedback = f"[{target_phoneme} correction] {anatomical_feedback} (Accuracy: {score:.1f}%)"
         else:
-            feedback = f"[{target_phoneme} 발음] 아주 자연스러운 이중모음입니다! (정확도: {score:.1f}점)"
+            feedback = f"[{target_phoneme} pronunciation] Natural diphthong! (Accuracy: {score:.1f}%)"
             
-        return {"score": score, "feedback": feedback}
+        return {"score": float(score), "feedback": feedback}
