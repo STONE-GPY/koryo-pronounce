@@ -24,32 +24,54 @@ class PronunciationApp:
         import soundfile as sf
         sf.write(temp_path, normalized_audio, 16000)
         
-        # 3. 음향 분석
+        # 3. 음향 분석 및 스코어링 (다중 모음 지원)
         # 화자 Pitch(F0) 측정 (개인화 스케일링용)
         user_pitch = self.analyzer.get_pitch(temp_path)
-        # 포먼트 추출
-        formants = self.analyzer.get_formants(temp_path)
         
-        # 4. 스코어링
-        # 타겟 문장의 음소 중 스코어러에 정의된 모음을 찾아 점수화
         import jamo
         decomposed = jamo.j2hcj(jamo.h2j(phonemes))
-        vowel_score = {"score": 100, "feedback": "분석할 수 있는 모음이 없습니다."}
-        for p in decomposed:
-            if p in self.scorer.vowel_standards:
-                vowel_score = self.scorer.score_vowel(p, formants["f1"], formants["f2"], user_pitch=user_pitch)
-                break
+        target_vowels = [p for p in decomposed if p in self.scorer.vowel_standards]
+        target_plosives = [p for p in decomposed if p in self.scorer.vot_standards]
+        
+        scores = []
+        feedback_list = []
+        raw_analysis = []
+        
+        # 파열음(VOT) 스코어링
+        if len(target_plosives) > 0:
+            vot_ms = self.analyzer.estimate_plosive_vot(temp_path)
+            # 여기서는 오디오 전체에서 가장 뚜렷한 onset의 VOT를 모든 파열음 평가에 일괄 적용 (단순화)
+            for plosive in target_plosives:
+                plosive_score = self.scorer.score_plosive(plosive, vot_ms)
+                scores.append(plosive_score["score"])
+                feedback_list.append(plosive_score["feedback"])
+                raw_analysis.append({"phoneme": plosive, "vot_ms": vot_ms})
+                
+        # 모음(Formant) 스코어링
+        if len(target_vowels) > 0:
+            segments_formants = self.analyzer.get_formants_for_segments(temp_path, len(target_vowels))
+            for i, vowel in enumerate(target_vowels):
+                f1 = segments_formants[i]["f1"]
+                f2 = segments_formants[i]["f2"]
+                vowel_score = self.scorer.score_vowel(vowel, f1, f2, user_pitch=user_pitch)
+                
+                scores.append(vowel_score["score"])
+                feedback_list.append(vowel_score["feedback"])
+                raw_analysis.append({"phoneme": vowel, "f1": f1, "f2": f2, "time": segments_formants[i]["time"]})
+            
+        if len(scores) > 0:
+            total_score = sum(scores) / len(scores)
+        else:
+            total_score = 100
+            feedback_list.append("분석할 수 있는 음소가 없습니다.")
         
         # 5. 최종 리포트 구성
         report = {
             "target_text": target_text,
             "target_phonemes": phonemes,
-            "total_score": vowel_score["score"],
-            "feedback_details": [vowel_score["feedback"]],
-            "analysis_raw": {
-                "f1": formants["f1"],
-                "f2": formants["f2"]
-            }
+            "total_score": total_score,
+            "feedback_details": feedback_list,
+            "analysis_raw": raw_analysis
         }
         
         if os.path.exists(temp_path):

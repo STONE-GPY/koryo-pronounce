@@ -7,27 +7,110 @@ class AcousticAnalyzer:
         pass
 
     def get_formants(self, audio_file: str) -> dict:
-        """Parselmouth (Praat)를 사용하여 F1, F2 추출"""
+        """Parselmouth (Praat)를 사용하여 최고 강도(Intensity) 지점의 F1, F2 추출"""
         sound = parselmouth.Sound(audio_file)
         # Praat Formant 분석 설정
         formant = sound.to_formant_burg(time_step=0.01, max_number_of_formants=5, 
                                         maximum_formant=5500.0, window_length=0.025, pre_emphasis_from=50.0)
         
-        # 중간 지점의 포먼트 값 추출
-        mid_time = sound.get_total_duration() / 2
-        f1 = formant.get_value_at_time(1, mid_time)
-        f2 = formant.get_value_at_time(2, mid_time)
+        # 최고 에너지(Intensity) 지점 탐색 (모음의 핵심 발음 구간일 확률이 높음)
+        try:
+            intensity = sound.to_intensity()
+            max_frame_idx = np.argmax(intensity.values[0])
+            target_time = intensity.get_time_from_frame_number(max_frame_idx + 1)
+        except Exception:
+            target_time = sound.get_total_duration() / 2
+        
+        f1 = formant.get_value_at_time(1, target_time)
+        f2 = formant.get_value_at_time(2, target_time)
         
         return {
-            "f1": f1 if not np.isnan(f1) else 0.0,
-            "f2": f2 if not np.isnan(f2) else 0.0
+            "f1": float(f1) if not np.isnan(f1) else 0.0,
+            "f2": float(f2) if not np.isnan(f2) else 0.0,
+            "time": float(target_time)
         }
 
-    def measure_vot(self, audio_file: str, burst_time: float, voicing_onset: float) -> float:
-        """VOT (Voice Onset Time) 계산 (ms 단위)"""
-        # VOT = (진동 시작 시간 - 파열음 버스트 시간) * 1000
+    def get_formants_for_segments(self, audio_file: str, num_segments: int) -> list:
+        """오디오를 N개 구간으로 나누고, 각 구간의 최고 강도 지점에서 포먼트 추출"""
+        if num_segments <= 0:
+            return []
+            
+        sound = parselmouth.Sound(audio_file)
+        formant = sound.to_formant_burg(time_step=0.01, max_number_of_formants=5, 
+                                        maximum_formant=5500.0, window_length=0.025, pre_emphasis_from=50.0)
+        duration = sound.get_total_duration()
+        results = []
+        
+        try:
+            intensity = sound.to_intensity()
+            times = intensity.xs()
+            segment_duration = duration / num_segments
+            
+            for i in range(num_segments):
+                start_time = i * segment_duration
+                end_time = (i + 1) * segment_duration
+                
+                valid_indices = np.where((times >= start_time) & (times < end_time))[0]
+                
+                if len(valid_indices) > 0:
+                    segment_intensity_values = intensity.values[0, valid_indices]
+                    max_idx_in_segment = np.argmax(segment_intensity_values)
+                    target_time = times[valid_indices[max_idx_in_segment]]
+                else:
+                    target_time = start_time + (segment_duration / 2)
+                    
+                f1 = formant.get_value_at_time(1, target_time)
+                f2 = formant.get_value_at_time(2, target_time)
+                
+                results.append({
+                    "f1": float(f1) if not np.isnan(f1) else 0.0,
+                    "f2": float(f2) if not np.isnan(f2) else 0.0,
+                    "time": float(target_time)
+                })
+        except Exception:
+            # 예외 발생 시 단순 분할 중간점 사용
+            segment_duration = duration / num_segments
+            for i in range(num_segments):
+                target_time = (i * segment_duration) + (segment_duration / 2)
+                f1 = formant.get_value_at_time(1, target_time)
+                f2 = formant.get_value_at_time(2, target_time)
+                results.append({
+                    "f1": float(f1) if not np.isnan(f1) else 0.0,
+                    "f2": float(f2) if not np.isnan(f2) else 0.0,
+                    "time": float(target_time)
+                })
+                
+        return results
+
+    def estimate_plosive_vot(self, audio_file: str) -> float:
+        """단순화된 파열음 VOT(Voice Onset Time) 자동 추정 로직 (ms 단위)"""
+        import librosa
+        import numpy as np
+        
+        y, sr = librosa.load(audio_file, sr=16000)
+        # Onset 탐지 (파열 버스트 시점 추정)
+        onsets = librosa.onset.onset_detect(y=y, sr=sr, units='time')
+        
+        if len(onsets) == 0:
+            return 30.0 # 탐지 실패 시 기본 평음 수준의 VOT 반환
+            
+        burst_time = onsets[0]
+        
+        # 에너지(RMS) 변화를 통해 유성음(Voicing) 시작 시점 추정
+        rms = librosa.feature.rms(y=y)[0]
+        times = librosa.frames_to_time(np.arange(len(rms)), sr=sr)
+        burst_frame = librosa.time_to_frames(burst_time, sr=sr)
+        
+        voicing_onset = burst_time
+        # 버스트 시점 이후 에너지가 급격히 증가하는 구간을 성대 진동(Voicing) 시작으로 간주
+        for i in range(burst_frame + 1, len(rms)):
+            if rms[i] > rms[burst_frame] * 1.5: 
+                voicing_onset = times[i]
+                break
+                
         vot_ms = (voicing_onset - burst_time) * 1000
-        return vot_ms
+        # 정상적인 VOT 범위 (0 ~ 150ms) 내로 클리핑
+        return float(np.clip(vot_ms, 0.0, 150.0))
 
     def get_pitch(self, audio_file: str) -> float:
         """Parselmouth를 사용하여 평균 Pitch(F0) 추출"""
