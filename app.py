@@ -1,55 +1,61 @@
+import os
+import sys
+import json
+import uuid
+import jamo
+import librosa
+import soundfile as sf
+from typing import Dict, Any, List
+
 from src.g2p_engine import KoryoG2PEngine
 from src.audio_processor import AudioProcessor
 from src.acoustic_analyzer import AcousticAnalyzer
 from src.scorer import PronunciationScorer
-import os
+from src.config import AudioConfig
 
 class PronunciationApp:
-    """고려인 대상 발음 교정 시스템 통합 애플리케이션"""
-    def __init__(self):
+    """Integrated pronunciation correction application for Koryo-saram."""
+    
+    def __init__(self) -> None:
         self.g2p = KoryoG2PEngine()
         self.audio_proc = AudioProcessor()
         self.analyzer = AcousticAnalyzer()
         self.scorer = PronunciationScorer()
 
-    def analyze_pronunciation(self, audio_path: str, target_text: str) -> dict:
-        """오디오와 제시된 문장을 비교하여 발음 분석 리포트 생성"""
-        import uuid
-        # 1. G2P 변환
+    def analyze_pronunciation(self, audio_path: str, target_text: str) -> Dict[str, Any]:
+        """Analyzes pronunciation by comparing the audio with the target text."""
+        # 1. G2P Conversion
         phonemes = self.g2p.convert(target_text)
         phonemes_no_space = phonemes.replace(" ", "")
         
-        # 2. 오디오 전처리
+        # 2. Audio Preprocessing
         normalized_audio = self.audio_proc.load_and_normalize(audio_path)
-        # 임시로 전처리된 오디오 저장 (분석용) - 동시성 에러(Race Condition) 방지
+        
+        # Save processed audio temporarily for analysis (prevents race condition)
         temp_path = f"data/temp_processed_{uuid.uuid4().hex}.wav"
-        import soundfile as sf
-        from src.config import AudioConfig
+        os.makedirs("data", exist_ok=True)
         sf.write(temp_path, normalized_audio, AudioConfig.SAMPLE_RATE)
         
-        # 3. 음향 분석 및 스코어링 (음절 동기화 및 이중모음 지원)
-        # 화자 Pitch(F0) 측정 (개인화 스케일링용)
+        # 3. Acoustic Analysis and Scoring (Syllable synchronization and diphthong support)
+        # Measure user Pitch(F0) for personalized scaling
         user_pitch = self.analyzer.get_pitch(temp_path)
         
-        import jamo
-        import librosa
-        
-        duration = librosa.get_duration(path=temp_path) # filename -> path (DeprecationWarning 해결)
-        num_syllables = len(phonemes_no_space) # 공백 제외 순수 발음 음절 수
+        duration = librosa.get_duration(path=temp_path)
+        num_syllables = len(phonemes_no_space) # Number of syllables excluding spaces
         segment_duration = duration / num_syllables if num_syllables > 0 else duration
         
-        scores = []
-        feedback_list = []
-        raw_analysis = []
+        scores: List[float] = []
+        feedback_list: List[str] = []
+        raw_analysis: List[Dict[str, Any]] = []
         
-        vowel_types = []
-        syllable_vowels = []
-        syllable_plosives = []
+        vowel_types: List[str] = []
+        syllable_vowels: List[str] = []
+        syllable_plosives: List[str] = []
         
         for char in phonemes_no_space:
             decomposed = jamo.j2hcj(jamo.h2j(char))
             
-            # 모음 탐색 (이중모음 우선)
+            # Search for vowels (diphthongs prioritized)
             v_type = None
             v_char = None
             for p in decomposed:
@@ -63,15 +69,15 @@ class PronunciationApp:
                     break
             
             vowel_types.append(v_type if v_type else "monophthong")
-            syllable_vowels.append(v_char)
+            syllable_vowels.append(v_char if v_char else "")
             
-            # 파열음 탐색
+            # Search for plosives
             p_char = None
             for p in decomposed:
                 if p in self.scorer.vot_standards:
                     p_char = p
                     break
-            syllable_plosives.append(p_char)
+            syllable_plosives.append(p_char if p_char else "")
             
         segments_formants = self.analyzer.get_formants_for_segments(temp_path, vowel_types)
         
@@ -79,38 +85,38 @@ class PronunciationApp:
             start_time = i * segment_duration
             end_time = (i + 1) * segment_duration
             
-            # 파열음 스코어링 (음절 단위 독립 매칭)
+            # Plosive scoring (independent matching per syllable)
             p_char = syllable_plosives[i]
             if p_char:
                 vot_ms = self.analyzer.estimate_plosive_vot(temp_path, start_time, end_time)
                 plosive_score = self.scorer.score_plosive(p_char, vot_ms)
-                scores.append(plosive_score["score"])
-                feedback_list.append(plosive_score["feedback"])
+                scores.append(float(plosive_score["score"]))
+                feedback_list.append(str(plosive_score["feedback"]))
                 raw_analysis.append({"phoneme": p_char, "vot_ms": vot_ms, "segment": i+1})
                 
-            # 모음 스코어링 (이중/단모음 구분)
+            # Vowel scoring (diphthong/monophthong distinction)
             v_char = syllable_vowels[i]
             v_type = vowel_types[i]
             if v_char and i < len(segments_formants):
                 seg_data = segments_formants[i]
                 if v_type == "diphthong":
                     score_res = self.scorer.score_diphthong(v_char, seg_data["start_f1"], seg_data["start_f2"], seg_data["end_f1"], seg_data["end_f2"], user_pitch)
-                    scores.append(score_res["score"])
-                    feedback_list.append(score_res["feedback"])
+                    scores.append(float(score_res["score"]))
+                    feedback_list.append(str(score_res["feedback"]))
                     raw_analysis.append({"phoneme": v_char, "start_f1": seg_data["start_f1"], "end_f1": seg_data["end_f1"], "segment": i+1})
                 else:
                     score_res = self.scorer.score_vowel(v_char, seg_data["f1"], seg_data["f2"], user_pitch)
-                    scores.append(score_res["score"])
-                    feedback_list.append(score_res["feedback"])
+                    scores.append(float(score_res["score"]))
+                    feedback_list.append(str(score_res["feedback"]))
                     raw_analysis.append({"phoneme": v_char, "f1": seg_data["f1"], "f2": seg_data["f2"], "segment": i+1})
             
         if len(scores) > 0:
             total_score = sum(scores) / len(scores)
         else:
-            total_score = 100
-            feedback_list.append("분석할 수 있는 음소가 없습니다.")
+            total_score = 100.0
+            feedback_list.append("No analyzable phonemes found.")
         
-        # 5. 최종 리포트 구성
+        # 5. Build final report
         report = {
             "target_text": target_text,
             "target_phonemes": phonemes,
@@ -125,12 +131,10 @@ class PronunciationApp:
         return report
 
 if __name__ == "__main__":
-    # CLI 실행 예시
-    import sys
+    # CLI execution example
     if len(sys.argv) < 3:
         print("Usage: python app.py <audio_path> <target_text>")
     else:
         app = PronunciationApp()
         result = app.analyze_pronunciation(sys.argv[1], sys.argv[2])
-        import json
         print(json.dumps(result, indent=4, ensure_ascii=False))
