@@ -1,0 +1,7 @@
+pytest
+librosa
+numpy
+praat-parselmouth
+g2pk
+scipy
+pydub
