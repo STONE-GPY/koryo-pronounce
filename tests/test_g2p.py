@@ -23,7 +23,12 @@ def test_empty_string():
 def test_get_phonemes():
     g2p = KoryoG2PEngine()
     sentence = "학교 가자"
-    result = g2p.get_phonemes(sentence)
+    result = g2p.get_phoneme_list(sentence)
     assert isinstance(result, list)
     assert len(result) == 2
     assert result[0] == "학꾜"
+
+def test_invalid_input():
+    g2p = KoryoG2PEngine()
+    assert g2p.convert(None) == ""
+    assert g2p.convert(123) == ""
