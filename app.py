@@ -24,40 +24,82 @@ class PronunciationApp:
         import soundfile as sf
         sf.write(temp_path, normalized_audio, 16000)
         
-        # 3. 음향 분석 및 스코어링 (다중 모음 지원)
+        # 3. 음향 분석 및 스코어링 (음절 동기화 및 이중모음 지원)
         # 화자 Pitch(F0) 측정 (개인화 스케일링용)
         user_pitch = self.analyzer.get_pitch(temp_path)
         
         import jamo
-        decomposed = jamo.j2hcj(jamo.h2j(phonemes))
-        target_vowels = [p for p in decomposed if p in self.scorer.vowel_standards]
-        target_plosives = [p for p in decomposed if p in self.scorer.vot_standards]
+        import librosa
+        
+        duration = librosa.get_duration(filename=temp_path)
+        num_syllables = len(phonemes)
+        segment_duration = duration / num_syllables if num_syllables > 0 else duration
         
         scores = []
         feedback_list = []
         raw_analysis = []
         
-        # 파열음(VOT) 스코어링
-        if len(target_plosives) > 0:
-            vot_ms = self.analyzer.estimate_plosive_vot(temp_path)
-            # 여기서는 오디오 전체에서 가장 뚜렷한 onset의 VOT를 모든 파열음 평가에 일괄 적용 (단순화)
-            for plosive in target_plosives:
-                plosive_score = self.scorer.score_plosive(plosive, vot_ms)
+        vowel_types = []
+        syllable_vowels = []
+        syllable_plosives = []
+        
+        for char in phonemes:
+            decomposed = jamo.j2hcj(jamo.h2j(char))
+            
+            # 모음 탐색 (이중모음 우선)
+            v_type = None
+            v_char = None
+            for p in decomposed:
+                if p in self.scorer.diphthong_standards:
+                    v_type = "diphthong"
+                    v_char = p
+                    break
+                elif p in self.scorer.vowel_standards:
+                    v_type = "monophthong"
+                    v_char = p
+                    break
+            
+            vowel_types.append(v_type if v_type else "monophthong")
+            syllable_vowels.append(v_char)
+            
+            # 파열음 탐색
+            p_char = None
+            for p in decomposed:
+                if p in self.scorer.vot_standards:
+                    p_char = p
+                    break
+            syllable_plosives.append(p_char)
+            
+        segments_formants = self.analyzer.get_formants_for_segments(temp_path, vowel_types)
+        
+        for i in range(num_syllables):
+            start_time = i * segment_duration
+            end_time = (i + 1) * segment_duration
+            
+            # 파열음 스코어링 (음절 단위 독립 매칭)
+            p_char = syllable_plosives[i]
+            if p_char:
+                vot_ms = self.analyzer.estimate_plosive_vot(temp_path, start_time, end_time)
+                plosive_score = self.scorer.score_plosive(p_char, vot_ms)
                 scores.append(plosive_score["score"])
                 feedback_list.append(plosive_score["feedback"])
-                raw_analysis.append({"phoneme": plosive, "vot_ms": vot_ms})
+                raw_analysis.append({"phoneme": p_char, "vot_ms": vot_ms, "segment": i+1})
                 
-        # 모음(Formant) 스코어링
-        if len(target_vowels) > 0:
-            segments_formants = self.analyzer.get_formants_for_segments(temp_path, len(target_vowels))
-            for i, vowel in enumerate(target_vowels):
-                f1 = segments_formants[i]["f1"]
-                f2 = segments_formants[i]["f2"]
-                vowel_score = self.scorer.score_vowel(vowel, f1, f2, user_pitch=user_pitch)
-                
-                scores.append(vowel_score["score"])
-                feedback_list.append(vowel_score["feedback"])
-                raw_analysis.append({"phoneme": vowel, "f1": f1, "f2": f2, "time": segments_formants[i]["time"]})
+            # 모음 스코어링 (이중/단모음 구분)
+            v_char = syllable_vowels[i]
+            v_type = vowel_types[i]
+            if v_char and i < len(segments_formants):
+                seg_data = segments_formants[i]
+                if v_type == "diphthong":
+                    score_res = self.scorer.score_diphthong(v_char, seg_data["start_f1"], seg_data["start_f2"], seg_data["end_f1"], seg_data["end_f2"], user_pitch)
+                    scores.append(score_res["score"])
+                    feedback_list.append(score_res["feedback"])
+                    raw_analysis.append({"phoneme": v_char, "start_f1": seg_data["start_f1"], "end_f1": seg_data["end_f1"], "segment": i+1})
+                else:
+                    score_res = self.scorer.score_vowel(v_char, seg_data["f1"], seg_data["f2"], user_pitch)
+                    scores.append(score_res["score"])
+                    feedback_list.append(score_res["feedback"])
+                    raw_analysis.append({"phoneme": v_char, "f1": seg_data["f1"], "f2": seg_data["f2"], "segment": i+1})
             
         if len(scores) > 0:
             total_score = sum(scores) / len(scores)
