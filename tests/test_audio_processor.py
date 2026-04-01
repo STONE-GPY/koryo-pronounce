@@ -17,7 +17,7 @@ def test_audio_normalization_and_vad():
     os.makedirs("data", exist_ok=True)
     sf.write(test_file, audio, sr)
     
-    processor = AudioProcessor(sample_rate=sr)
+    processor = AudioProcessor(target_sample_rate=sr)
     
     # 2. 로드 및 정규화 테스트
     processed_audio = processor.load_and_normalize(test_file)
