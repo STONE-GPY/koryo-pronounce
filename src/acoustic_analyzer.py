@@ -1,25 +1,34 @@
 import parselmouth
 import numpy as np
+import librosa
+from typing import Dict, List, Any, Optional
 from src.config import AudioConfig, PraatConfig, VotConfig, PitchConfig
 
 class AcousticAnalyzer:
-    """음성학적 분석 (Formant, VOT) 담당"""
-    def __init__(self):
+    """Handles acoustic analysis (Formant, VOT)."""
+    
+    def __init__(self) -> None:
+        """Initialize the analyzer."""
         pass
 
-    def get_formants(self, audio_file: str) -> dict:
-        """Parselmouth (Praat)를 사용하여 최고 강도(Intensity) 지점의 F1, F2 추출"""
+    def get_formants(self, audio_file: str) -> Dict[str, float]:
+        """Extract F1 and F2 at the point of maximum intensity using Parselmouth (Praat)."""
         sound = parselmouth.Sound(audio_file)
-        formant = sound.to_formant_burg(time_step=PraatConfig.TIME_STEP, max_number_of_formants=PraatConfig.MAX_FORMANTS, 
-                                        maximum_formant=PraatConfig.MAX_FORMANT_FREQ, window_length=PraatConfig.WINDOW_LENGTH, 
-                                        pre_emphasis_from=PraatConfig.PRE_EMPHASIS)
+        formant = sound.to_formant_burg(
+            time_step=PraatConfig.TIME_STEP, 
+            max_number_of_formants=PraatConfig.MAX_FORMANTS, 
+            maximum_formant=PraatConfig.MAX_FORMANT_FREQ, 
+            window_length=PraatConfig.WINDOW_LENGTH, 
+            pre_emphasis_from=PraatConfig.PRE_EMPHASIS
+        )
         
         try:
             intensity = sound.to_intensity()
-            max_frame_idx = np.argmax(intensity.values[0])
+            max_frame_idx = int(np.argmax(intensity.values[0]))
             target_time = intensity.get_time_from_frame_number(max_frame_idx + 1)
-        except Exception:
-            target_time = sound.get_total_duration() / 2
+        except Exception as e:
+            print(f"Intensity extraction failed: {e}")
+            target_time = sound.get_total_duration() / 2.0
         
         f1 = formant.get_value_at_time(1, target_time)
         f2 = formant.get_value_at_time(2, target_time)
@@ -30,17 +39,22 @@ class AcousticAnalyzer:
             "time": float(target_time)
         }
 
-    def get_formants_for_segments(self, audio_file: str, vowel_types: list) -> list:
+    def get_formants_for_segments(self, audio_file: str, vowel_types: List[str]) -> List[Dict[str, Any]]:
+        """Extracts formants for multiple vowel segments."""
         num_segments = len(vowel_types)
         if num_segments <= 0:
             return []
             
         sound = parselmouth.Sound(audio_file)
-        formant = sound.to_formant_burg(time_step=PraatConfig.TIME_STEP, max_number_of_formants=PraatConfig.MAX_FORMANTS, 
-                                        maximum_formant=PraatConfig.MAX_FORMANT_FREQ, window_length=PraatConfig.WINDOW_LENGTH, 
-                                        pre_emphasis_from=PraatConfig.PRE_EMPHASIS)
+        formant = sound.to_formant_burg(
+            time_step=PraatConfig.TIME_STEP, 
+            max_number_of_formants=PraatConfig.MAX_FORMANTS, 
+            maximum_formant=PraatConfig.MAX_FORMANT_FREQ, 
+            window_length=PraatConfig.WINDOW_LENGTH, 
+            pre_emphasis_from=PraatConfig.PRE_EMPHASIS
+        )
         duration = sound.get_total_duration()
-        results = []
+        results: List[Dict[str, Any]] = []
         
         try:
             intensity = sound.to_intensity()
@@ -84,15 +98,13 @@ class AcousticAnalyzer:
                         "f2": float(f2) if not np.isnan(f2) else 0.0,
                         "time": float(target_time)
                     })
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Error extracting formants for segments: {e}")
                 
         return results
 
-    def estimate_plosive_vot(self, audio_file: str, start_time: float = 0.0, end_time: float = None) -> float:
-        import librosa
-        import numpy as np
-        
+    def estimate_plosive_vot(self, audio_file: str, start_time: float = 0.0, end_time: Optional[float] = None) -> float:
+        """Estimates the Voice Onset Time (VOT) for a plosive segment."""
         y, sr = librosa.load(audio_file, sr=AudioConfig.SAMPLE_RATE)
         
         if end_time is None:
@@ -105,7 +117,7 @@ class AcousticAnalyzer:
         onsets = librosa.onset.onset_detect(y=y_seg, sr=sr, units='time')
         
         if len(onsets) == 0:
-            return VotConfig.DEFAULT_VOT_ON_FAIL
+            return float(VotConfig.DEFAULT_VOT_ON_FAIL)
             
         burst_time = onsets[0]
         
@@ -119,10 +131,11 @@ class AcousticAnalyzer:
                 voicing_onset = times[i]
                 break
                 
-        vot_ms = (voicing_onset - burst_time) * 1000
+        vot_ms = (voicing_onset - burst_time) * 1000.0
         return float(np.clip(vot_ms, 0.0, VotConfig.MAX_VOT_MS))
 
     def get_pitch(self, audio_file: str) -> float:
+        """Extracts the average pitch (F0) from the audio."""
         sound = parselmouth.Sound(audio_file)
         pitch = sound.to_pitch()
         pitch_values = pitch.selected_array['frequency']
@@ -132,10 +145,12 @@ class AcousticAnalyzer:
         return 0.0
 
     def estimate_gender(self, audio_file: str) -> str:
+        """Estimates the speaker's gender based on average pitch."""
         mean_pitch = self.get_pitch(audio_file)
         if mean_pitch == 0.0:
             return "unknown"
         return "female" if mean_pitch > PitchConfig.GENDER_THRESHOLD else "male"
 
     def analyze_vowel_space(self, f1: float, f2: float) -> str:
+        """Analyzes the vowel space (placeholder)."""
         return "Not Implemented"
