@@ -22,3 +22,24 @@ def test_full_pipeline_analysis():
     assert isinstance(result["total_score"], (int, float))
     
     os.remove(test_audio)
+
+
+def test_whisperx_analysis():
+    # 1. 테스트용 오디오 생성
+    sr = 16000
+    t = np.linspace(0, 1.0, sr)
+    audio = 0.5 * np.sin(2 * np.pi * 440 * t)
+    test_audio = "data/whisperx_test.wav"
+    os.makedirs("data", exist_ok=True)
+    sf.write(test_audio, audio, sr)
+
+    app = PronunciationApp()
+    result = app.analyze_with_whisperx(test_audio, "학교")
+
+    assert "target_text" in result
+    assert "total_score" in result
+    assert "feedback_details" in result
+    assert "analysis_raw" in result
+    assert isinstance(result["total_score"], (int, float))
+
+    os.remove(test_audio)
