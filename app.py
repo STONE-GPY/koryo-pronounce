@@ -12,6 +12,7 @@ from src.audio_processor import AudioProcessor
 from src.acoustic_analyzer import AcousticAnalyzer
 from src.scorer import PronunciationScorer
 from src.config import AudioConfig
+from src.whisperx_processor import WhisperXProcessor
 
 class PronunciationApp:
     """Integrated pronunciation correction application for Koryo-saram."""
@@ -21,6 +22,30 @@ class PronunciationApp:
         self.audio_proc = AudioProcessor()
         self.analyzer = AcousticAnalyzer()
         self.scorer = PronunciationScorer()
+        self.whisperx_proc = None
+
+    def analyze_with_whisperx(self, audio_path: str, target_text: str) -> Dict[str, Any]:
+        """Analyzes pronunciation using WhisperX for transcription comparison."""
+        # Initialize WhisperX lazily to avoid overhead if not used
+        if self.whisperx_proc is None:
+            self.whisperx_proc = WhisperXProcessor()
+
+        result = self.whisperx_proc.transcribe_and_align(audio_path)
+
+        # Determine success/failure or basic comparison
+        recognized_text = result.get("text", "")
+        # Very simple similarity heuristic or just returning text for user feedback
+        is_exact_match = (recognized_text.replace(" ", "") == target_text.replace(" ", ""))
+
+        report = {
+            "target_text": target_text,
+            "whisperx_recognized_text": recognized_text,
+            "is_exact_match": is_exact_match,
+            "whisperx_segments": result.get("segments", []),
+            "whisperx_word_segments": result.get("word_segments", []),
+            "error": result.get("error", None)
+        }
+        return report
 
     def analyze_pronunciation(self, audio_path: str, target_text: str) -> Dict[str, Any]:
         """Analyzes pronunciation by comparing the audio with the target text."""
