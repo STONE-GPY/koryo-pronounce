@@ -12,6 +12,7 @@ from src.audio_processor import AudioProcessor
 from src.acoustic_analyzer import AcousticAnalyzer
 from src.scorer import PronunciationScorer
 from src.config import AudioConfig
+from src.whisperx_processor import WhisperXProcessor
 
 class PronunciationApp:
     """Integrated pronunciation correction application for Koryo-saram."""
@@ -21,6 +22,75 @@ class PronunciationApp:
         self.audio_proc = AudioProcessor()
         self.analyzer = AcousticAnalyzer()
         self.scorer = PronunciationScorer()
+        self.whisperx_proc = None
+
+    def analyze_with_whisperx(self, audio_path: str, target_text: str) -> Dict[str, Any]:
+        """Analyzes pronunciation using WhisperX for transcription comparison."""
+        if self.whisperx_proc is None:
+            self.whisperx_proc = WhisperXProcessor()
+
+        result = self.whisperx_proc.transcribe_and_align(audio_path)
+
+        recognized_text = result.get("text", "")
+        error = result.get("error", None)
+
+        feedback_list = []
+        raw_analysis = []
+        total_score = 0.0
+
+        if error:
+            return {
+                "target_text": target_text,
+                "target_phonemes": self.g2p.convert(target_text),
+                "total_score": 0.0,
+                "feedback_details": [f"Analysis Error: {error}"],
+                "analysis_raw": []
+            }
+
+        word_segments = result.get("word_segments", [])
+
+        scores = []
+        for w_seg in word_segments:
+            word = w_seg.get("word", "")
+            score = w_seg.get("score", 0.0)
+
+            # Map score from 0.0-1.0 to 0-100
+            word_score = score * 100.0
+            scores.append(word_score)
+
+            raw_analysis.append({
+                "word": word,
+                "confidence": score,
+                "start": w_seg.get("start", 0.0),
+                "end": w_seg.get("end", 0.0),
+                "chars": w_seg.get("chars", [])
+            })
+
+            if word_score < 70.0:
+                feedback_list.append(f"['{word}'] 발음의 정확도가 낮습니다 (신뢰도: {word_score:.1f}%). 더 또렷하게 발음해 보세요.")
+
+        if not word_segments:
+             feedback_list.append("음성에서 단어를 인식하지 못했습니다.")
+             total_score = 0.0
+        else:
+             total_score = sum(scores) / len(scores)
+
+        # Check text match
+        if recognized_text.replace(" ", "") != target_text.replace(" ", "") and recognized_text:
+            feedback_list.append(f"목표 문장과 인식된 문장이 다릅니다. (인식된 문장: '{recognized_text}')")
+            total_score = total_score * 0.8 # Penalty for mismatch
+
+        if not feedback_list and total_score > 0:
+            feedback_list.append("매우 훌륭한 발음입니다!")
+
+        report = {
+            "target_text": target_text,
+            "target_phonemes": self.g2p.convert(target_text),
+            "total_score": float(total_score),
+            "feedback_details": feedback_list,
+            "analysis_raw": raw_analysis
+        }
+        return report
 
     def analyze_pronunciation(self, audio_path: str, target_text: str) -> Dict[str, Any]:
         """Analyzes pronunciation by comparing the audio with the target text."""

@@ -1,126 +1,114 @@
-const sentences = ["학교", "수업", "국물 같이 먹자", "고려인", "안녕하세요", "발음 교정", "안녕하세요", "의사 선생님"];
-const targetSentenceEl = document.getElementById("target-sentence");
-const recordBtn = document.getElementById("record-btn");
-const recordStatus = document.getElementById("record-status");
-const resultContainer = document.getElementById("result-container");
-const loadingContainer = document.getElementById("loading");
-const totalScoreEl = document.getElementById("total-score");
-const feedbackList = document.getElementById("feedback-list");
-
 let mediaRecorder;
 let audioChunks = [];
 let isRecording = false;
 
+const sentences = ["안녕하세요", "학교", "고려인", "사과", "바다", "대한민국"];
+let currentSentenceIdx = 0;
+
 function changeSentence() {
-    const current = targetSentenceEl.innerText;
-    let next = current;
-    while (next === current) {
-        next = sentences[Math.floor(Math.random() * sentences.length)];
-    }
-    targetSentenceEl.innerText = next;
-    resultContainer.classList.add("hidden");
+    currentSentenceIdx = (currentSentenceIdx + 1) % sentences.length;
+    document.getElementById('target-sentence').innerText = sentences[currentSentenceIdx];
+    document.getElementById('result-wrapper').classList.add('hidden');
 }
 
+document.getElementById('record-btn').addEventListener('click', async () => {
+    if (!isRecording) {
+        startRecording();
+    } else {
+        stopRecording();
+    }
+});
+
 async function startRecording() {
+    audioChunks = [];
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         mediaRecorder = new MediaRecorder(stream);
-        audioChunks = [];
-
-        mediaRecorder.ondataavailable = event => {
-            if (event.data.size > 0) {
-                audioChunks.push(event.data);
-            }
+        mediaRecorder.ondataavailable = (event) => {
+            audioChunks.push(event.data);
         };
-
-        mediaRecorder.onstop = async () => {
-            // Provide a generic wav/webm mimetype. The backend librosa handles both gracefully if ffmpeg is present.
+        mediaRecorder.onstop = () => {
             const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-            await analyzeAudio(audioBlob);
+            analyzeAudio(audioBlob);
         };
-
         mediaRecorder.start();
         isRecording = true;
-        recordBtn.classList.add("recording");
-        recordBtn.innerHTML = '<i class="fas fa-stop"></i>';
-        recordStatus.innerText = "녹음 중... 버튼을 다시 누르면 완료";
-        resultContainer.classList.add("hidden");
-
+        document.getElementById('record-btn').classList.add('recording');
+        document.getElementById('record-status').innerText = "녹음 중... 다시 눌러 완료";
     } catch (err) {
-        alert("마이크 권한이 필요하거나, 브라우저가 지원하지 않습니다.");
-        console.error("Mic error:", err);
+        alert("마이크 접근 권한이 필요합니다.");
     }
 }
 
 function stopRecording() {
-    if (mediaRecorder && mediaRecorder.state !== "inactive") {
-        mediaRecorder.stop();
-        mediaRecorder.stream.getTracks().forEach(track => track.stop());
-    }
+    mediaRecorder.stop();
     isRecording = false;
-    recordBtn.classList.remove("recording");
-    recordBtn.innerHTML = '<i class="fas fa-microphone"></i>';
-    recordStatus.innerText = "버튼을 눌러 녹음 시작";
+    document.getElementById('record-btn').classList.remove('recording');
+    document.getElementById('record-status').innerText = "분석 중...";
 }
-
-recordBtn.addEventListener("click", () => {
-    if (isRecording) {
-        stopRecording();
-    } else {
-        startRecording();
-    }
-});
 
 async function analyzeAudio(audioBlob) {
-    loadingContainer.classList.remove("hidden");
-    resultContainer.classList.add("hidden");
-
+    const targetText = document.getElementById('target-sentence').innerText;
     const formData = new FormData();
-    formData.append("audio", audioBlob, "recording.webm");
-    formData.append("target_text", targetSentenceEl.innerText);
+    formData.append('audio', audioBlob, 'record.webm');
+    formData.append('target_text', targetText);
+
+    document.getElementById('loading').classList.remove('hidden');
+    document.getElementById('result-wrapper').classList.add('hidden');
 
     try {
-        const response = await fetch("/api/analyze", {
-            method: "POST",
-            body: formData
-        });
-        
-        if (!response.ok) {
-            throw new Error(`서버 응답 오류: ${response.status}`);
-        }
+        // Run both analyzes in parallel
+        const [acousticRes, whisperRes] = await Promise.all([
+            fetch('/api/analyze', { method: 'POST', body: formData }),
+            fetch('/api/analyze_whisperx', { method: 'POST', body: formData })
+        ]);
 
-        const data = await response.json();
-        displayResult(data);
-    } catch (error) {
-        console.error("Analysis error:", error);
-        alert("분석 중 오류가 발생했습니다. (백엔드 서버가 켜져 있는지 확인하세요)");
+        const acousticData = await acousticRes.json();
+        const whisperData = await whisperRes.json();
+
+        displayResults(acousticData, whisperData);
+    } catch (err) {
+        alert("분석 중 오류가 발생했습니다.");
     } finally {
-        loadingContainer.classList.add("hidden");
+        document.getElementById('loading').classList.add('hidden');
     }
 }
 
-function displayResult(data) {
-    const score = isNaN(data.total_score) ? 0 : Math.round(data.total_score);
-    totalScoreEl.innerText = score;
+function displayResults(acoustic, whisper) {
+    document.getElementById('result-wrapper').classList.remove('hidden');
+
+    // 1. Acoustic Results
+    document.getElementById('acoustic-score').innerText = `${acoustic.total_score.toFixed(1)}점`;
+    const acousticList = document.getElementById('acoustic-feedback');
+    acousticList.innerHTML = '';
+    acoustic.feedback_details.forEach(fb => {
+        const li = document.createElement('li');
+        li.innerText = fb;
+        acousticList.appendChild(li);
+    });
+
+    // 2. WhisperX Results
+    document.getElementById('whisper-score').innerText = `${whisper.total_score.toFixed(1)}점`;
+    const whisperList = document.getElementById('whisper-feedback');
+    whisperList.innerHTML = '';
+    whisper.feedback_details.forEach(fb => {
+        const li = document.createElement('li');
+        li.innerText = fb;
+        whisperList.appendChild(li);
+    });
+
+    // Whisper Alignment Visualization
+    const alignmentDiv = document.getElementById('whisper-alignment');
+    alignmentDiv.innerHTML = '';
     
-    // Set circle color based on score
-    const circle = document.querySelector('.score-circle');
-    if (score >= 80) circle.style.borderColor = "var(--success)";
-    else if (score >= 50) circle.style.borderColor = "#ffd166";
-    else circle.style.borderColor = "var(--danger)";
-
-    feedbackList.innerHTML = "";
-    if (data.feedback_details && data.feedback_details.length > 0) {
-        data.feedback_details.forEach(fb => {
-            const li = document.createElement("li");
-            li.innerText = fb;
-            feedbackList.appendChild(li);
+    // Check if we have word segments
+    if (whisper.analysis_raw && whisper.analysis_raw.length > 0) {
+        whisper.analysis_raw.forEach(wordObj => {
+            const span = document.createElement('span');
+            span.className = 'char-box ' + (wordObj.confidence > 0.7 ? 'high-conf' : 'low-conf');
+            span.innerText = wordObj.word;
+            span.title = `Confidence: ${(wordObj.confidence * 100).toFixed(1)}%`;
+            alignmentDiv.appendChild(span);
         });
-    } else {
-        const li = document.createElement("li");
-        li.innerText = "분석된 피드백이 없습니다.";
-        feedbackList.appendChild(li);
     }
-
-    resultContainer.classList.remove("hidden");
 }
