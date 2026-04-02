@@ -49,7 +49,7 @@ class WhisperXProcessor:
             # 2. Align whisper output (optional, but highly recommended for pronunciation tasks)
             # Alignment requires a separate model, often loaded dynamically based on language
             model_a, metadata = whisperx.load_align_model(language_code="ko", device=self.device)
-            result_aligned = whisperx.align(result["segments"], model_a, metadata, audio, self.device, return_char_alignments=False)
+            result_aligned = whisperx.align(result["segments"], model_a, metadata, audio, self.device, return_char_alignments=True)
 
             return {
                 "text": recognized_text,

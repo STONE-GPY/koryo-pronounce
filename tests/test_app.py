@@ -37,8 +37,9 @@ def test_whisperx_analysis():
     result = app.analyze_with_whisperx(test_audio, "학교")
 
     assert "target_text" in result
-    assert "whisperx_recognized_text" in result
-    assert "is_exact_match" in result
-    assert "whisperx_segments" in result
+    assert "total_score" in result
+    assert "feedback_details" in result
+    assert "analysis_raw" in result
+    assert isinstance(result["total_score"], (int, float))
 
     os.remove(test_audio)
