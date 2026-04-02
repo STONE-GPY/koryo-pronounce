@@ -56,17 +56,19 @@ async function analyzeAudio(audioBlob) {
     document.getElementById('loading').classList.remove('hidden');
     document.getElementById('result-wrapper').classList.add('hidden');
 
-    try {
-        // Run both analyzes in parallel
-        const [acousticRes, whisperRes] = await Promise.all([
+    try:
+        // Parallel call for comparison (Step 9) + New Hybrid analysis
+        const [acousticRes, whisperRes, hybridRes] = await Promise.all([
             fetch('/api/analyze', { method: 'POST', body: formData }),
-            fetch('/api/analyze_whisperx', { method: 'POST', body: formData })
+            fetch('/api/analyze_whisperx', { method: 'POST', body: formData }),
+            fetch('/api/analyze_hybrid', { method: 'POST', body: formData })
         ]);
 
         const acousticData = await acousticRes.json();
         const whisperData = await whisperRes.json();
+        const hybridData = await hybridRes.json();
 
-        displayResults(acousticData, whisperData);
+        displayResults(acousticData, whisperData, hybridData);
     } catch (err) {
         alert("분석 중 오류가 발생했습니다.");
     } finally {
@@ -74,7 +76,7 @@ async function analyzeAudio(audioBlob) {
     }
 }
 
-function displayResults(acoustic, whisper) {
+function displayResults(acoustic, whisper, hybrid) {
     document.getElementById('result-wrapper').classList.remove('hidden');
 
     // 1. Acoustic Results
@@ -96,6 +98,16 @@ function displayResults(acoustic, whisper) {
         li.innerText = fb;
         whisperList.appendChild(li);
     });
+
+    // 3. Hybrid Summary (Step 5, 6, 7)
+    // Update main total score with hybrid results
+    const hybridScoreElem = document.getElementById('hybrid-score');
+    if (hybridScoreElem) {
+        hybridScoreElem.innerText = `${hybrid.total_score.toFixed(1)}점`;
+    }
+    
+    // Add hybrid feedback to a new section or use existing ones
+    console.log("Hybrid result:", hybrid);
 
     // Whisper Alignment Visualization
     const alignmentDiv = document.getElementById('whisper-alignment');

@@ -92,6 +92,57 @@ class PronunciationApp:
         }
         return report
 
+    def analyze_hybrid(self, audio_path: str, target_text: str) -> Dict[str, Any]:
+        """Hybrid analysis: Uses WhisperX for segmentation and Acoustic for precision."""
+        # 1. Run WhisperX first for segmentation and word-level scoring
+        if self.whisperx_proc is None:
+            self.whisperx_proc = WhisperXProcessor()
+        
+        whisper_res = self.whisperx_proc.transcribe_and_align(audio_path)
+        recognized_text = whisper_res.get("text", "").replace(" ", "").replace(".", "")
+        target_text_clean = target_text.replace(" ", "")
+        
+        # 2. Text Match Validation
+        text_match = (recognized_text == target_text_clean)
+        
+        # 3. Acoustic Analysis for each word (Step 4 & 5)
+        # We'll use WhisperX timestamps to get better accuracy in AcousticAnalyzer
+        hybrid_feedback = []
+        acoustic_scores = []
+        
+        word_segments = whisper_res.get("word_segments", [])
+        for w_seg in word_segments:
+            word = w_seg.get("word", "")
+            # Only analyze if it exists in target text to avoid confusion
+            if word in target_text:
+                # Potential: Analyze specific phonemes in this time range
+                pass
+        
+        # Fallback to existing acoustic analysis if whisperx is not enough
+        acoustic_report = self.analyze_pronunciation(audio_path, target_text)
+        
+        # Calculate Weighted Total Score (WhisperX 60% + Acoustic 40%)
+        # But if text doesn't match, cap the score at 60
+        whisper_score = 0.0
+        if word_segments:
+            whisper_score = sum([w.get("score", 0.0) for w in word_segments]) / len(word_segments) * 100.0
+        
+        total_score = (whisper_score * 0.6) + (acoustic_report['total_score'] * 0.4)
+        
+        if not text_match:
+            total_score = min(total_score, 60.0)
+            hybrid_feedback.append(f"인식된 문장('{recognized_text}')이 목표와 다릅니다. 정확한 단어를 읽었는지 확인하세요.")
+        
+        hybrid_feedback.extend(acoustic_report['feedback_details'])
+        
+        return {
+            "target_text": target_text,
+            "total_score": float(total_score),
+            "feedback_details": hybrid_feedback,
+            "is_match": text_match,
+            "whisper_details": whisper_res
+        }
+
     def analyze_pronunciation(self, audio_path: str, target_text: str) -> Dict[str, Any]:
         """Analyzes pronunciation by comparing the audio with the target text."""
         # 1. G2P Conversion

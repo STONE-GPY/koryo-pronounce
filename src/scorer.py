@@ -1,4 +1,4 @@
-from typing import Dict, List, Tuple, Union, Optional
+from typing import Dict, List, Tuple, Union, Optional, Any
 from src.config import PitchConfig, ScoringConfig
 
 class PronunciationScorer:
@@ -41,6 +41,28 @@ class PronunciationScorer:
             "ㅒ": ((300.0, 2200.0), (600.0, 1600.0)),
             "ㅖ": ((300.0, 2200.0), (550.0, 1700.0))
         }
+        
+        # Koryo-mar (Koryo-saram dialect) characteristics
+        # 1. Monophthongization of diphthongs (e.g., 'ㅕ' -> 'ㅔ' or 'ㅣ')
+        # 2. Palatalization differences
+        self.koryo_dialect_rules = {
+            "ㅕ": ["ㅔ", "ㅣ"],
+            "ㅢ": ["ㅣ"],
+            "ㅚ": ["ㅔ"]
+        }
+
+    def check_koryo_dialect_acceptance(self, target_phoneme: str, user_f1: float, user_f2: float, user_pitch: float = 0.0) -> Optional[Dict[str, Any]]:
+        """Checks if the user's pronunciation matches a valid Koryo-mar dialect variation."""
+        if target_phoneme in self.koryo_dialect_rules:
+            variations = self.koryo_dialect_rules[target_phoneme]
+            for var in variations:
+                res = self.score_vowel(var, user_f1, user_f2, user_pitch)
+                if res["score"] > 85.0:
+                    return {
+                        "score": float(res["score"] * 0.95), # Slight penalty for not being 'standard'
+                        "feedback": f"[고려말 인정] '{target_phoneme}'를 '{var}'로 발음하셨네요. 고려인 커뮤니티에서는 자연스러운 발음입니다."
+                    }
+        return None
 
     @property
     def vowel_standards(self) -> List[str]:
