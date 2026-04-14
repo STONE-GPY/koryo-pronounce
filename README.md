@@ -1,56 +1,61 @@
-# 발음 고려 (Pronunciation Koryo)
+# koryo-pronounce
 
-고려인 및 한국어 학습자를 위한 인공지능 기반 발음 교정 및 분석 시스템입니다. 음향학적 수치(Formant, VOT)를 기반으로 사용자 발음의 정확도를 측정하고 피드백을 제공합니다.
+고려인 한국어 학습자를 위한 음향 분석 및 음성 인식 기반 발음 교정 시스템입니다.
 
 ## 주요 기능
-- **G2P (Grapheme-to-Phoneme):** 텍스트를 실제 발음 음소열로 변환 (공백 및 특수 처리 지원)
-- **음향 분석 (Acoustic Analysis):** Parselmouth(Praat) 및 Librosa를 활용한 포먼트(F1, F2), 성도 전이, VOT 측정
-- **발음 채점:** 표준 발음 수치와 사용자 발음을 비교하여 점수 산출 및 해부학적 피드백 생성
-- **개인화 스케일링:** 사용자의 피치(Pitch)에 따른 모음 공간 자동 최적화
+- **Hybrid Evaluation:** WhisperX의 인식 신뢰도(60%)와 Acoustic 엔진의 포먼트/VOT 정밀 분석(40%)을 결합한 채점 로직.
+- **Denoising:** 스펙트럼 차감법(Spectral Subtraction) 및 Band-pass Filter(80Hz-8000Hz)를 통한 오디오 전처리.
+- **Partial Matching:** 발화가 목표 문장보다 길거나 추가 발화가 포함된 경우에도 포함 관계를 분석하여 정당한 점수 산출.
+- **Dialect Support:** 고려말 방언 특성(ㅢ->ㅣ, ㅕ->ㅔ 등) 감지 시 점수 보전 및 피드백 제공.
+- **Acoustic Analysis:** Praat(Parselmouth)를 활용한 F1/F2 포먼트 추출 및 파열음(ㄱ,ㄲ,ㅋ) VOT 측정.
 
-## 시작하기
+## 기술 스택
+- **Audio:** librosa, parselmouth, scipy, pydub
+- **STT/Alignment:** WhisperX (Faster-Whisper + Pyannote VAD)
+- **G2P:** g2pk
+- **Server:** FastAPI
+
+## 설치 및 실행
 
 ### 1. 환경 설정
-Python 3.10 이상의 환경이 필요합니다.
 ```bash
-# 가상환경 생성 및 활성화
 python3 -m venv venv
 source venv/bin/activate
-
-# 의존성 설치
 pip install -r requirements.txt
 ```
 
-### 2. 사용 방법 (Step-by-Step)
+### 2. 실행 방법
+- **CLI 분석:**
+  ```bash
+  python app.py <audio_path> <target_text>
+  ```
+- **API 서버:**
+  ```bash
+  uvicorn api:app --host 0.0.0.0 --port 8000
+  ```
 
-#### API 서버 실행
-웹 브라우저에서 UI를 확인하거나 API를 호출하려면 서버를 실행합니다.
+## 데이터셋 구조 (`data/`)
+- `anchor/`: 표준어 화자(뉴스 앵커 등)의 기준 음원 및 텍스트.
+- `koryo/`: 고려인 인터뷰 및 학습자 발음 데이터.
+- `*.wav`: 시스템 검증용 표준 TTS 샘플.
+
+## 핵심 로직 (app.py)
+1. `AudioProcessor.denoise`: 오디오 로드 및 배경 소음 제거.
+2. `WhisperXProcessor.transcribe_and_align`: 단어 단위 타임스탬프 및 인식률 추출.
+3. `PronunciationApp.analyze_hybrid`: WhisperX 결과와 Acoustic 분석 수치 결합.
+4. `PronunciationScorer`: 화자 Pitch 기반 포먼트 스케일링 및 고려말 방언 규칙 적용.
+
+## 시스템 평가 방식 직접 비교하기 (Step-by-Step)
+정식 애플리케이션 실행 파일인 `app.py`를 통해 두 가지 채점 방식(Acoustic 엔진 단독 분석 vs Hybrid 엔진)의 차이를 직접 테스트해 볼 수 있습니다.
+
 ```bash
-# FastAPI 서버 실행
-uvicorn api:app --host 0.0.0.0 --port 8000
-```
-- 접속 주소: `http://localhost:8000` (UI 포함)
+# 1. 기본 음향(Acoustic) 방식 테스트 (물리적 해부학 교정 위주)
+python app.py data/koryo/seg_019_188.2.wav "아이들이 이렇게 오니까 혹시나 문제가 생기지 않을까 싶어서 좀 불안한 부분이 많은데 어쩔 수 없이 여기서 수업을 진행할 수 밖에 없"
 
-#### CLI 분석 실행
-명령줄에서 특정 오디오 파일을 직접 분석할 수 있습니다.
-```bash
-# 사용법: python app.py <오디오_경로> <목표_문장>
-python app.py data/sample.wav "안녕하세요"
+# 2. 하이브리드(Hybrid) 방식 테스트 (AI 인식률 결합 및 방언 수용, `--hybrid` 플래그 추가)
+python app.py data/koryo/seg_019_188.2.wav "아이들이 이렇게 오니까 혹시나 문제가 생기지 않을까 싶어서 좀 불안한 부분이 많은데 어쩔 수 없이 여기서 수업을 진행할 수 밖에 없" --hybrid
 ```
 
-#### 테스트 실행
-시스템의 안정성을 확인하려면 단위 테스트를 실행합니다.
-```bash
-python3 -m pytest tests/
-```
-
-## 프로젝트 구조
-- `src/`: 핵심 분석 로직 (G2P, 음향 분석, 채점기)
-- `api.py`: FastAPI 기반 웹 인터페이스
-- `app.py`: 통합 분석 애플리케이션 (CLI 지원)
-- `static/`: 웹 UI (HTML/CSS/JS)
-- `tests/`: 단위 및 통합 테스트 코드
-- `data/`: 오디오 샘플 및 임시 업로드 저장소
-
-## 라이선스
-본 프로젝트는 교육 및 연구 목적으로 제작되었습니다.
+**결과 확인 포인트:**
+- **Acoustic (`app.py` 기본):** 모든 음절의 물리적 주파수(F1/F2) 위치를 엄격하게 측정하여 점수가 낮게 나오더라도 세밀한 입 모양 교정 피드백을 제공합니다.
+- **Hybrid (`--hybrid` 플래그):** 실제 대화 환경을 고려하여 WhisperX의 AI 인식률을 반영하고, 부분 일치 로직을 통해 부당한 감점 없이 전달력을 평가합니다.

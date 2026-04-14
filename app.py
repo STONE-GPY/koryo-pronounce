@@ -93,53 +93,60 @@ class PronunciationApp:
         return report
 
     def analyze_hybrid(self, audio_path: str, target_text: str) -> Dict[str, Any]:
-        """Hybrid analysis: Uses WhisperX for segmentation and Acoustic for precision."""
-        # 1. Run WhisperX first for segmentation and word-level scoring
+        """Hybrid analysis: Uses WhisperX for segmentation and Acoustic for precision.
+        Improved with partial matching for real-world interview data.
+        """
+        # 1. Run WhisperX first
         if self.whisperx_proc is None:
             self.whisperx_proc = WhisperXProcessor()
         
         whisper_res = self.whisperx_proc.transcribe_and_align(audio_path)
-        recognized_text = whisper_res.get("text", "").replace(" ", "").replace(".", "")
-        target_text_clean = target_text.replace(" ", "")
+        recognized_text = whisper_res.get("text", "").replace(" ", "").replace(".", "").strip()
+        target_text_clean = target_text.replace(" ", "").replace(".", "").strip()
         
-        # 2. Text Match Validation
-        text_match = (recognized_text == target_text_clean)
+        # 2. Advanced Text Match (Inclusion & Similarity)
+        # Check if target is contained in recognized (common in interviews)
+        is_included = target_text_clean in recognized_text or recognized_text in target_text_clean
         
-        # 3. Acoustic Analysis for each word (Step 4 & 5)
-        # We'll use WhisperX timestamps to get better accuracy in AcousticAnalyzer
-        hybrid_feedback = []
-        acoustic_scores = []
+        # Simple similarity: ratio of length or characters (placeholder for fuzzy match)
+        common_len = min(len(recognized_text), len(target_text_clean))
+        match_ratio = 1.0 if is_included else (common_len / max(len(recognized_text), len(target_text_clean), 1))
         
-        word_segments = whisper_res.get("word_segments", [])
-        for w_seg in word_segments:
-            word = w_seg.get("word", "")
-            # Only analyze if it exists in target text to avoid confusion
-            if word in target_text:
-                # Potential: Analyze specific phonemes in this time range
-                pass
-        
-        # Fallback to existing acoustic analysis if whisperx is not enough
+        # 3. Acoustic Analysis (Step 4 & 5)
         acoustic_report = self.analyze_pronunciation(audio_path, target_text)
         
-        # Calculate Weighted Total Score (WhisperX 60% + Acoustic 40%)
-        # But if text doesn't match, cap the score at 60
+        # 4. Hybrid Scoring Logic
         whisper_score = 0.0
+        word_segments = whisper_res.get("word_segments", [])
         if word_segments:
+            # Score based on recognized word confidence
             whisper_score = sum([w.get("score", 0.0) for w in word_segments]) / len(word_segments) * 100.0
         
+        # Weighting: WhisperX(Recognition) 60% + Acoustic(Physical) 40%
+        # If included, we don't apply the mismatch penalty
         total_score = (whisper_score * 0.6) + (acoustic_report['total_score'] * 0.4)
         
-        if not text_match:
-            total_score = min(total_score, 60.0)
-            hybrid_feedback.append(f"인식된 문장('{recognized_text}')이 목표와 다릅니다. 정확한 단어를 읽었는지 확인하세요.")
+        if not is_included and match_ratio < 0.5:
+            total_score = total_score * match_ratio # Apply penalty only if significantly different
+            match_status = "불일치 (Mismatch)"
+        elif is_included:
+            match_status = "부분 일치/포함 (Partial Match)"
+        else:
+            match_status = "유사함 (Similar)"
+            total_score = total_score * 0.9 # Slight penalty for slight difference
+        
+        hybrid_feedback = []
+        if is_included:
+            hybrid_feedback.append(f"문장이 정확히 인식되었습니다. (추가 발화 포함됨)")
         
         hybrid_feedback.extend(acoustic_report['feedback_details'])
         
         return {
             "target_text": target_text,
+            "recognized_text": whisper_res.get("text", ""),
             "total_score": float(total_score),
             "feedback_details": hybrid_feedback,
-            "is_match": text_match,
+            "match_status": match_status,
             "whisper_details": whisper_res
         }
 
@@ -254,8 +261,11 @@ class PronunciationApp:
 if __name__ == "__main__":
     # CLI execution example
     if len(sys.argv) < 3:
-        print("Usage: python app.py <audio_path> <target_text>")
+        print("Usage: python app.py <audio_path> <target_text> [--hybrid]")
     else:
         app = PronunciationApp()
-        result = app.analyze_pronunciation(sys.argv[1], sys.argv[2])
+        if len(sys.argv) > 3 and sys.argv[3] == "--hybrid":
+            result = app.analyze_hybrid(sys.argv[1], sys.argv[2])
+        else:
+            result = app.analyze_pronunciation(sys.argv[1], sys.argv[2])
         print(json.dumps(result, indent=4, ensure_ascii=False))
